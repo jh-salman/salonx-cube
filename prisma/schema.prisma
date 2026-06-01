@@ -1,0 +1,36 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Shared cube configuration — same on every device.
+model CubeState {
+  id        String   @id @default("default")
+  faces     Json
+  settings  Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+/// Uploaded face images / top-face videos (stored in DB for Render portability).
+model CubeMedia {
+  id        String   @id @default(cuid())
+  mimeType  String
+  data      Bytes
+  size      Int
+  createdAt DateTime @default(now())
+}
+
+/// Gate / lead capture from the cube welcome flow.
+model CubeLead {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  name      String   @default("")
+  handled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
