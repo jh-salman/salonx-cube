@@ -7,25 +7,50 @@ datasource db {
   provider = "postgresql"
 }
 
-/// Shared cube configuration — same on every device.
-model CubeState {
-  id        String   @id @default("default")
-  faces     Json
-  settings  Json
-  updatedAt DateTime @updatedAt
-  createdAt DateTime @default(now())
+/// Single shared SALON X cube (builder + viewer).
+model Cube {
+  id           String     @id @default("default")
+  name         String     @default("SALON X Cube")
+  masterLinkOn Boolean    @default(false)
+  masterLink   String     @default("")
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  faces        CubeFace[]
 }
 
-/// Uploaded face images / top-face videos (stored in DB for Render portability).
+/// One row per face: Right(0), Left(1), Top(2), Bottom(3), Front(4), Back(5).
+model CubeFace {
+  id        String     @id @default(cuid())
+  cubeId    String
+  cube      Cube       @relation(fields: [cubeId], references: [id], onDelete: Cascade)
+  faceIndex Int
+  label     String
+  kind      String     @default("image") // image | video
+  fit       String     @default("cover") // cover | contain | stretch
+  zoom      Float      @default(1)
+  panX      Float      @default(0)
+  panY      Float      @default(0)
+  link      String     @default("")
+  mediaId   String?    @unique
+  media     CubeMedia? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  updatedAt DateTime   @updatedAt
+  createdAt DateTime   @default(now())
+
+  @@unique([cubeId, faceIndex])
+  @@index([cubeId])
+}
+
+/// Face images and top-face videos.
 model CubeMedia {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   mimeType  String
   data      Bytes
   size      Int
-  createdAt DateTime @default(now())
+  face      CubeFace?
+  createdAt DateTime  @default(now())
 }
 
-/// Gate / lead capture from the cube welcome flow.
+/// Welcome gate leads.
 model CubeLead {
   id        String   @id @default(cuid())
   phone     String   @unique

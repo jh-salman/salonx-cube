@@ -1,64 +1,58 @@
 # salonx-cube
 
-Next.js app for the **SALON X — Cube** 3D experience. Cube faces, hyperlinks, and uploaded media are stored in **PostgreSQL** via Prisma so the same cube appears on every device.
+**SALON X — Cube** with a fully database-backed builder. Every face (image/video, zoom, pan, fit, hyperlink) and master link settings live in **PostgreSQL** via Prisma — the same cube on every device.
 
-## Stack
+## Database schema
 
-- Next.js 16 (App Router)
-- Prisma + PostgreSQL
-- Three.js cube bundle (`public/cube-bundle.js`)
+| Model | Purpose |
+|-------|---------|
+| `Cube` | Root record (`id: default`), master link toggle + URL |
+| `CubeFace` | 6 rows — Right, Left, Top, Bottom, Front, Back |
+| `CubeMedia` | Uploaded images / top-face videos (BYTEA) |
+| `CubeLead` | Phone/name from welcome gate |
+
+Each `CubeFace` stores: `kind`, `fit`, `zoom`, `panX`, `panY`, `link`, optional `mediaId`.
+
+## API routes
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/cube` | Load full cube (6 faces + settings) |
+| `PUT` | `/api/cube` | Save cube (uploads blob/data URLs server-side) |
+| `GET` | `/api/cube/faces/[index]` | Load one face (`0`–`5`) |
+| `PATCH` | `/api/cube/faces/[index]` | Update one face (zoom, pan, fit, link, etc.) |
+| `POST` | `/api/cube/media` | Upload file — `file` + optional `faceIndex` |
+| `GET` | `/api/cube/media/[id]` | Serve stored media |
+| `POST` | `/api/cube/leads` | Save lead `{ phone, name? }` |
+
+## Builder behavior (dynamic)
+
+- **Upload image** → instant `POST /api/cube/media` → face linked in DB
+- **Upload video** (Top face) → same flow
+- **Zoom / Pan sliders** → auto-save ~450ms after change
+- **Save button** → full `PUT /api/cube`
+- **Master link toggle** → saved to `Cube` table
+- **Per-face hyperlink** → saved on each face row
 
 ## Setup
 
 ```bash
 cp .env.example .env
-# Edit DATABASE_URL with your PostgreSQL connection string
+# Set DATABASE_URL
 
 npm install
-npm run db:push    # create tables (dev)
-# or: npm run db:migrate
-
+npm run db:deploy   # run migration
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
-
-## Database
-
-| Model | Purpose |
-|-------|---------|
-| `CubeState` | 6 faces + master link settings (single shared cube, id `default`) |
-| `CubeMedia` | Uploaded images / top-face videos (served at `/api/cube/media/[id]`) |
-| `CubeLead` | Phone/name leads from the welcome gate |
-
-### API
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/cube` | Load cube state |
-| `PUT` | `/api/cube` | Save cube state |
-| `POST` | `/api/cube/media` | Upload image/video (`multipart/form-data`, field `file`) |
-| `GET` | `/api/cube/media/[id]` | Serve stored media |
-| `POST` | `/api/cube/leads` | Save lead `{ phone, name? }` |
-
 ## Render deploy
 
-1. Create a **PostgreSQL** database on Render (or use Neon/Supabase).
-2. Create a **Web Service** from this repo.
-3. Environment variables:
-   - `DATABASE_URL` — Internal Database URL from Render Postgres
-   - `NODE_VERSION=22`
-4. Build command: `npm install && npm run build`
-5. Start command: `npm start`
-6. After first deploy, run migrations once (Render Shell):
+**Environment:**
 
-```bash
-npx prisma migrate deploy
 ```
-
-Or use `npm run db:push` in build (not recommended for production) — prefer migrate deploy.
-
-### Recommended Render build (includes migrate)
+DATABASE_URL=<Render Postgres Internal URL>
+NODE_VERSION=22
+```
 
 **Build command:**
 
@@ -66,8 +60,15 @@ Or use `npm run db:push` in build (not recommended for production) — prefer mi
 npm install && npx prisma migrate deploy && npm run build
 ```
 
-## Notes
+**Start:** `npm start`
 
-- Custom face uploads are sent to PostgreSQL on **Save** (blob/data URLs are replaced with `/api/cube/media/...` URLs).
-- Gate passcode flow still uses browser `localStorage` for session convenience; cube content is fully server-backed.
-- Video uploads: max ~30MB; images: max ~8MB per file.
+## Face index map
+
+| Index | Label |
+|-------|--------|
+| 0 | Right |
+| 1 | Left |
+| 2 | Top (video allowed) |
+| 3 | Bottom |
+| 4 | Front |
+| 5 | Back |
