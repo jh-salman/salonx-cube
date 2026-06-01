@@ -20,7 +20,11 @@ yarn-debug.log*
 yarn-error.log*
 
 # local env files
+.env
 .env*.local
+
+# local dev logs
+dev-server.log
 
 # typescript
 *.tsbuildinfo

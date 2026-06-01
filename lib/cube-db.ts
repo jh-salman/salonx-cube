@@ -208,44 +208,75 @@ export async function saveCubeState(payload: unknown): Promise<CubeDto> {
   const { faces, settings, name } = normalizeCubePayload(payload);
   await ensureCube();
 
-  await prisma.$transaction(async (tx) => {
-    await tx.cube.update({
+  // Read all faces once (outside the transaction) to avoid per-face
+  // round-trips inside an interactive transaction, which can exceed the
+  // 5s timeout against a remote (e.g. Render Oregon) database.
+  const existingFaces = await prisma.cubeFace.findMany({
+    where: { cubeId: CUBE_ID },
+  });
+  const existingByIndex = new Map(
+    existingFaces.map((row) => [row.faceIndex, row]),
+  );
+
+  const ops: Awaited<ReturnType<typeof buildSaveOps>> = buildSaveOps(
+    faces,
+    settings,
+    name,
+    existingByIndex,
+  );
+
+  // Batched array transaction is not subject to the interactive
+  // transaction timeout (P2028) and runs every write atomically.
+  await prisma.$transaction(ops);
+
+  return getCubeState();
+}
+
+function buildSaveOps(
+  faces: CubeFaceDto[],
+  settings: CubeSettingsDto,
+  name: string | undefined,
+  existingByIndex: Map<
+    number,
+    { id: string; mediaId: string | null; faceIndex: number }
+  >,
+) {
+  const ops: ReturnType<typeof prisma.cube.update>[] = [];
+  const mediaDeletes: string[] = [];
+
+  ops.push(
+    prisma.cube.update({
       where: { id: CUBE_ID },
       data: {
         ...(name ? { name } : {}),
         masterLinkOn: settings.masterLinkOn,
         masterLink: settings.masterLink,
       },
-    });
+    }) as unknown as ReturnType<typeof prisma.cube.update>,
+  );
 
-    for (let faceIndex = 0; faceIndex < 6; faceIndex++) {
-      const face = faces[faceIndex];
-      const existing = await tx.cubeFace.findUnique({
-        where: { cubeId_faceIndex: { cubeId: CUBE_ID, faceIndex } },
-        include: { media: true },
-      });
+  for (let faceIndex = 0; faceIndex < 6; faceIndex++) {
+    const face = faces[faceIndex];
+    const existing = existingByIndex.get(faceIndex);
+    if (!existing) continue;
 
-      if (!existing) continue;
+    let mediaId = existing.mediaId;
 
-      let mediaId = existing.mediaId;
-
-      if (!face.custom || !face.src) {
-        if (mediaId) {
-          await tx.cubeMedia.delete({ where: { id: mediaId } }).catch(() => {});
-          mediaId = null;
-        }
-      } else if (face.src.startsWith("/api/cube/media/")) {
-        const id = face.src.split("/").pop();
-        if (id) mediaId = id;
-      } else if (
-        face.src.startsWith("data:") ||
-        face.src.startsWith("blob:")
-      ) {
-        // Preview-only URL in browser — keep existing DB media until upload completes.
-        mediaId = existing.mediaId;
+    if (!face.custom || !face.src) {
+      if (mediaId) {
+        mediaDeletes.push(mediaId);
+        mediaId = null;
       }
+    } else if (face.src.startsWith("/api/cube/media/")) {
+      const id = face.src.split("/").pop();
+      if (id) mediaId = id;
+    } else if (face.src.startsWith("data:") || face.src.startsWith("blob:")) {
+      // Preview-only URL in browser — keep existing DB media until upload completes.
+      mediaId = existing.mediaId;
+    }
 
-      await tx.cubeFace.update({
+    ops.push(
+      prisma.cubeFace.update({
         where: { id: existing.id },
         data: {
           kind: face.kind,
@@ -256,11 +287,20 @@ export async function saveCubeState(payload: unknown): Promise<CubeDto> {
           link: face.link,
           mediaId,
         },
-      });
-    }
-  });
+      }) as unknown as ReturnType<typeof prisma.cube.update>,
+    );
+  }
 
-  return getCubeState();
+  // Delete orphaned media after faces have been pointed away from them.
+  for (const id of mediaDeletes) {
+    ops.push(
+      prisma.cubeMedia.delete({
+        where: { id },
+      }) as unknown as ReturnType<typeof prisma.cube.update>,
+    );
+  }
+
+  return ops;
 }
 
 export async function updateCubeFace(
@@ -332,7 +372,7 @@ export async function uploadCubeMedia(
     }
 
     return created;
-  });
+  }, { timeout: 20000, maxWait: 15000 });
 
   return {
     id: media.id,
