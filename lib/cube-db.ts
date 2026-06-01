@@ -237,6 +237,12 @@ export async function saveCubeState(payload: unknown): Promise<CubeDto> {
       } else if (face.src.startsWith("/api/cube/media/")) {
         const id = face.src.split("/").pop();
         if (id) mediaId = id;
+      } else if (
+        face.src.startsWith("data:") ||
+        face.src.startsWith("blob:")
+      ) {
+        // Preview-only URL in browser — keep existing DB media until upload completes.
+        mediaId = existing.mediaId;
       }
 
       await tx.cubeFace.update({
@@ -321,7 +327,6 @@ export async function uploadCubeMedia(
         data: {
           mediaId: created.id,
           kind: isVideo ? "video" : "image",
-          custom: true,
         },
       });
     }
