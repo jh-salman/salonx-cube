@@ -33,7 +33,15 @@ export async function GET() {
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const faces = Array.isArray(body.faces) ? body.faces : [];
+
+    if (!Array.isArray(body.faces) || body.faces.length !== 6) {
+      return NextResponse.json(
+        { error: "Invalid payload: expected faces array with 6 items" },
+        { status: 400 },
+      );
+    }
+
+    const faces = body.faces;
     const settings = body.settings ?? {};
 
     const state = hasPendingUploads(faces)
